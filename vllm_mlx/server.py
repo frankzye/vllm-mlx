@@ -1011,6 +1011,8 @@ async def create_transcription(
         }
         model_name = model_map.get(model, model)
 
+        model_name = f"{os.environ.get('VLLM_MLX_MODEL_PATH', '')}/{model_name}" if os.environ.get('VLLM_MLX_MODEL_PATH', '') else model_name
+
         # Load engine if needed
         if _stt_engine is None or _stt_engine.model_name != model_name:
             _stt_engine = STTEngine(model_name)
@@ -1078,6 +1080,7 @@ async def create_speech(
             "voxcpm": "mlx-community/VoxCPM1.5",
         }
         model_name = model_map.get(model, model)
+        model_name = f"{os.environ.get('VLLM_MLX_MODEL_PATH', '')}/{model_name}" if os.environ.get('VLLM_MLX_MODEL_PATH', '') else model_name
 
         # Load engine if needed
         if _tts_engine is None or _tts_engine.model_name != model_name:
