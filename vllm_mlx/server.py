@@ -550,6 +550,8 @@ def load_embedding_model(
     if not model_name:
         return
 
+    model_name = f"{os.environ.get('VLLM_MLX_MODEL_PATH', '')}/{model_name}" if os.environ.get('VLLM_MLX_MODEL_PATH', '') else model_name
+
     if lock:
         _embedding_model_locked = model_name
 
