@@ -602,6 +602,9 @@ def load_model(
     """
     global _engine, _model_name, _model_path, _default_max_tokens, _tool_parser_instance
 
+    # rewrite model_name to use the full path
+    model_name = f"{os.environ.get('VLLM_MLX_MODEL_PATH', '')}/{model_name}" if os.environ.get('VLLM_MLX_MODEL_PATH', '') else model_name
+
     _default_max_tokens = max_tokens
     _model_path = model_name
     _model_name = served_model_name or model_name
