@@ -18,14 +18,21 @@ Features:
 - Tool calling (Qwen/Llama formats)
 
 Usage:
-    # Simple mode (maximum throughput)
+    # Simple mode (maximum throughput), preload weights at startup
     python -m vllm_mlx.server --model mlx-community/Llama-3.2-3B-Instruct-4bit
+
+    # No --model: start empty; first request loads the `model` from the JSON body
+    # (single-slot cache; swap by sending a different model id), like mlx-vlm.
+    python -m vllm_mlx.server --host 0.0.0.0 --port 8000
 
     # Batched mode (for multiple concurrent users)
     python -m vllm_mlx.server --model mlx-community/Llama-3.2-3B-Instruct-4bit --continuous-batching
 
     # With MCP tools
     python -m vllm_mlx.server --model mlx-community/Qwen3-4B-4bit --mcp-config mcp.json
+
+    # Preload via env when using uvicorn directly (optional)
+    VLLM_MLX_PRELOAD_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit uvicorn vllm_mlx.server:app
 
 The server provides:
     - POST /v1/completions - Text completions
@@ -39,6 +46,7 @@ The server provides:
 
 import argparse
 import asyncio
+import gc
 import json
 import logging
 import os
@@ -149,6 +157,30 @@ _mcp_executor = None
 _embedding_engine = None
 _embedding_model_locked: str | None = None  # Set when --embedding-model is used
 
+# Engine load options (set from CLI in main(); used for on-demand model swaps)
+_load_model_runtime_kwargs: dict = {
+    "use_batching": False,
+    "scheduler_config": None,
+    "stream_interval": 1,
+    "max_tokens": 32768,
+    "force_mllm": False,
+    "served_model_name": None,
+    "mtp": False,
+    "prefill_step_size": 2048,
+    "specprefill_enabled": False,
+    "specprefill_threshold": 8192,
+    "specprefill_keep_pct": 0.3,
+    "specprefill_draft_model": None,
+}
+_model_switch_lock: asyncio.Lock | None = None
+
+
+def _get_model_switch_lock() -> asyncio.Lock:
+    global _model_switch_lock
+    if _model_switch_lock is None:
+        _model_switch_lock = asyncio.Lock()
+    return _model_switch_lock
+
 # API key authentication
 _api_key: str | None = None
 _auth_warning_logged: bool = False
@@ -212,6 +244,15 @@ def _get_cache_dir() -> str:
 async def lifespan(app: FastAPI):
     """FastAPI lifespan for startup/shutdown events."""
     global _engine, _mcp_manager
+
+    preload = os.environ.get("VLLM_MLX_PRELOAD_MODEL")
+    if preload and _engine is None:
+        try:
+            await ensure_model_loaded(preload)
+        except Exception as e:
+            logger.warning(
+                f"Failed to preload model from VLLM_MLX_PRELOAD_MODEL={preload!r}: {e}"
+            )
 
     # Startup: Start engine if loaded (needed for BatchedEngine in uvicorn's event loop)
     if _engine is not None and hasattr(_engine, "_loaded") and not _engine._loaded:
@@ -341,14 +382,63 @@ def get_engine() -> BaseEngine:
     return _engine
 
 
-def _validate_model_name(request_model: str) -> None:
-    """Validate that the request model name matches the served model."""
-    if _model_name and request_model != _model_name:
+async def ensure_model_loaded(request_model: str) -> None:
+    """
+    Ensure the requested model is loaded, using a single-slot cache (mlx-vlm style).
+
+    If a different model is already loaded, it is stopped and replaced.
+    """
+    if not request_model or not str(request_model).strip():
         raise HTTPException(
-            status_code=404,
-            detail=f"The model `{request_model}` does not exist. "
-            f"Available model: `{_model_name}`",
+            status_code=400,
+            detail="A non-empty `model` field is required.",
         )
+
+    request_model = str(request_model).strip()
+
+    async with _get_model_switch_lock():
+        if _engine is not None and (
+            request_model == _model_path
+            or (_model_name is not None and request_model == _model_name)
+        ):
+            return
+
+        if _engine is not None:
+            try:
+                await _engine.stop()
+            finally:
+                try:
+                    import mlx.core as mx
+
+                    mx.clear_cache()
+                except Exception:
+                    pass
+                gc.collect()
+
+        kw = _load_model_runtime_kwargs
+        load_model(
+            request_model,
+            use_batching=kw["use_batching"],
+            scheduler_config=kw["scheduler_config"],
+            stream_interval=kw["stream_interval"],
+            max_tokens=kw["max_tokens"],
+            force_mllm=kw["force_mllm"],
+            served_model_name=kw.get("served_model_name"),
+            mtp=kw["mtp"],
+            prefill_step_size=kw["prefill_step_size"],
+            specprefill_enabled=kw["specprefill_enabled"],
+            specprefill_threshold=kw["specprefill_threshold"],
+            specprefill_keep_pct=kw["specprefill_keep_pct"],
+            specprefill_draft_model=kw["specprefill_draft_model"],
+            defer_simple_start=True,
+        )
+
+        assert _engine is not None
+        if not _engine._loaded:
+            await _engine.start()
+
+        if _engine is not None and hasattr(_engine, "load_cache_from_disk"):
+            _load_prefix_cache_from_disk()
 
 
 def _parse_tool_calls_with_parser(
@@ -490,6 +580,7 @@ def load_model(
     specprefill_threshold: int = 8192,
     specprefill_keep_pct: float = 0.3,
     specprefill_draft_model: str = None,
+    defer_simple_start: bool = False,
 ):
     """
     Load a model (auto-detects MLLM vs LLM).
@@ -507,6 +598,7 @@ def load_model(
         specprefill_threshold: Minimum suffix tokens to trigger SpecPrefill (default: 8192)
         specprefill_keep_pct: Fraction of tokens to keep (default: 0.3)
         specprefill_draft_model: Path to small draft model for SpecPrefill scoring
+        defer_simple_start: If True, SimpleEngine is not started here (caller awaits start).
     """
     global _engine, _model_name, _model_path, _default_max_tokens, _tool_parser_instance
 
@@ -527,8 +619,7 @@ def load_model(
             stream_interval=stream_interval,
             force_mllm=force_mllm,
         )
-        # BatchedEngine will be started in lifespan (uvicorn's event loop)
-        # Just log for now
+        # BatchedEngine is started in lifespan (preload) or by ensure_model_loaded (dynamic)
         logger.info(f"Model loaded (batched mode): {model_name}")
     else:
         logger.info(f"Loading model with SimpleEngine: {model_name}")
@@ -542,13 +633,16 @@ def load_model(
             specprefill_keep_pct=specprefill_keep_pct,
             specprefill_draft_model=specprefill_draft_model,
         )
-        # Start SimpleEngine synchronously (no background loop)
-        # Use new_event_loop() for Python 3.10+ compatibility (get_event_loop() is deprecated)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_engine.start())
-        model_type = "MLLM" if _engine.is_mllm else "LLM"
-        logger.info(f"{model_type} model loaded (simple mode): {model_name}")
+        if defer_simple_start:
+            logger.info("SimpleEngine created; start deferred to async context")
+        else:
+            # Start SimpleEngine synchronously (no background loop)
+            # Use new_event_loop() for Python 3.10+ compatibility (get_event_loop() is deprecated)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(_engine.start())
+            model_type = "MLLM" if _engine.is_mllm else "LLM"
+            logger.info(f"{model_type} model loaded (simple mode): {model_name}")
 
     # Set native tool format support on the engine (thread-safe via instance property)
     _engine.preserve_native_tool_format = _detect_native_tool_support()
@@ -1204,7 +1298,7 @@ async def _wait_with_disconnect(
 )
 async def create_completion(request: CompletionRequest, raw_request: Request):
     """Create a text completion."""
-    _validate_model_name(request.model)
+    await ensure_model_loaded(request.model)
     engine = get_engine()
 
     # Handle single prompt or list of prompts
@@ -1325,7 +1419,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
     }
     ```
     """
-    _validate_model_name(request.model)
+    await ensure_model_loaded(request.model)
     engine = get_engine()
 
     # --- Detailed request logging ---
@@ -1545,13 +1639,11 @@ async def create_anthropic_message(
 
     Supports both streaming and non-streaming modes.
     """
-    engine = get_engine()
-
-    # Parse the raw body to handle Anthropic request format
     body = await request.json()
     anthropic_request = AnthropicRequest(**body)
 
-    _validate_model_name(anthropic_request.model)
+    await ensure_model_loaded(anthropic_request.model)
+    engine = get_engine()
 
     # --- Detailed request logging ---
     n_msgs = len(anthropic_request.messages)
@@ -1671,6 +1763,14 @@ async def count_anthropic_tokens(request: Request):
     from Claude Code don't include max_tokens.
     """
     body = await request.json()
+
+    model_id = body.get("model")
+    if not model_id:
+        raise HTTPException(
+            status_code=400,
+            detail="`model` is required in the request body.",
+        )
+    await ensure_model_loaded(model_id)
 
     engine = get_engine()
     tokenizer = engine.tokenizer
@@ -2204,8 +2304,14 @@ Examples:
     parser.add_argument(
         "--model",
         type=str,
-        default="mlx-community/Llama-3.2-3B-Instruct-4bit",
-        help="Model to load (HuggingFace model name or local path)",
+        default=None,
+        help=(
+            "Optional: preload this LLM at startup (HuggingFace id or local path). "
+            "If omitted, the server starts without a loaded model; the first "
+            "/v1/chat/completions or /v1/completions request loads the model from "
+            "the request `model` field (single-slot cache, swapped on change). "
+            "You can also set VLLM_MLX_PRELOAD_MODEL when launching via uvicorn."
+        ),
     )
     parser.add_argument(
         "--host",
@@ -2294,6 +2400,23 @@ Examples:
 
     args = parser.parse_args()
 
+    # Engine load options for preload and for on-demand ensure_model_loaded()
+    global _load_model_runtime_kwargs
+    _load_model_runtime_kwargs = {
+        "use_batching": args.continuous_batching,
+        "scheduler_config": None,
+        "stream_interval": 1,
+        "max_tokens": args.max_tokens,
+        "force_mllm": args.mllm,
+        "served_model_name": None,
+        "mtp": False,
+        "prefill_step_size": 2048,
+        "specprefill_enabled": False,
+        "specprefill_threshold": 8192,
+        "specprefill_keep_pct": 0.3,
+        "specprefill_draft_model": None,
+    }
+
     # Set global configuration
     global _api_key, _default_timeout, _rate_limiter
     global _default_temperature, _default_top_p
@@ -2339,16 +2462,24 @@ Examples:
         _reasoning_parser = parser_cls()
         logger.info(f"Reasoning parser enabled: {args.reasoning_parser}")
 
-    # Pre-load embedding model if specified
-    load_embedding_model(args.embedding_model, lock=True)
+    # Optional: pin embeddings to one model for the process (mlx-vlm-style preload)
+    if args.embedding_model:
+        load_embedding_model(args.embedding_model, lock=True)
 
-    # Load model before starting server
-    load_model(
-        args.model,
-        use_batching=args.continuous_batching,
-        max_tokens=args.max_tokens,
-        force_mllm=args.mllm,
-    )
+    if args.model:
+        load_model(
+            args.model,
+            use_batching=args.continuous_batching,
+            max_tokens=args.max_tokens,
+            force_mllm=args.mllm,
+        )
+        logger.info("LLM preloaded from --model; ready to serve.")
+    else:
+        logger.info(
+            "No --model: LLM is not preloaded. "
+            "The first generation request will load the weights for the `model` "
+            "in the request body, or set VLLM_MLX_PRELOAD_MODEL for uvicorn-only launches."
+        )
 
     # Start server
     uvicorn.run(app, host=args.host, port=args.port)

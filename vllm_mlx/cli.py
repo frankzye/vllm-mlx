@@ -206,6 +206,22 @@ def serve_command(args):
         specprefill_draft_model=args.specprefill_draft_model,
     )
 
+    # Used by server.ensure_model_loaded() when swapping models at runtime
+    server._load_model_runtime_kwargs = {
+        "use_batching": args.continuous_batching,
+        "scheduler_config": scheduler_config,
+        "stream_interval": args.stream_interval if args.continuous_batching else 1,
+        "max_tokens": args.max_tokens,
+        "force_mllm": args.mllm,
+        "served_model_name": args.served_model_name,
+        "mtp": args.enable_mtp,
+        "prefill_step_size": args.prefill_step_size,
+        "specprefill_enabled": args.specprefill,
+        "specprefill_threshold": args.specprefill_threshold,
+        "specprefill_keep_pct": args.specprefill_keep_pct,
+        "specprefill_draft_model": args.specprefill_draft_model,
+    }
+
     # Start server
     print(f"Starting server at http://{args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
