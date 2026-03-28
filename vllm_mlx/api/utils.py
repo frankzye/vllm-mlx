@@ -132,6 +132,8 @@ MLLM_PATTERNS = [
     "InternVL",  # InternVL
     "deepseek-vl",
     "DeepSeek-VL",  # DeepSeek-VL
+    "GLM-OCR",
+    "Qwen3-5"
 ]
 
 
