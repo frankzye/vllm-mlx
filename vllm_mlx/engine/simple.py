@@ -589,7 +589,7 @@ class SimpleEngine(BaseEngine):
             # with tool call parsing (tags leak as raw text), unless overridden.
             thinking_val = enable_thinking
             if thinking_val is None:
-                thinking_val = "coder" not in self._model_name.lower()
+                thinking_val = False
             template_kwargs = {
                 "tokenize": False,
                 "add_generation_prompt": True,
