@@ -879,7 +879,7 @@ class MLXMultimodalLM:
                 **template_kwargs,
             )
         except TypeError:
-            template_kwargs.pop("enable_thinking", None)
+            template_kwargs.pop("enable_thinking", False)
             text = self.processor.apply_chat_template(
                 native_messages,
                 tokenize=False,
@@ -1341,7 +1341,7 @@ class MLXMultimodalLM:
         video_max_frames = kwargs.pop("video_max_frames", MAX_FRAMES)
         tools = kwargs.pop("tools", None)
         use_cache = kwargs.pop("use_cache", True)
-        enable_thinking = kwargs.pop("enable_thinking", None)
+        enable_thinking = kwargs.pop("enable_thinking", False)
 
         # Collect video inputs from messages
         _msg_video_inputs = self._collect_video_inputs(messages)
@@ -1741,7 +1741,7 @@ class MLXMultimodalLM:
         video_max_frames = kwargs.pop("video_max_frames", MAX_FRAMES)
         tools = kwargs.pop("tools", None)
         use_cache = kwargs.pop("use_cache", True)
-        enable_thinking = kwargs.pop("enable_thinking", None)
+        enable_thinking = kwargs.pop("enable_thinking", False)
 
         # Collect video inputs from messages
         _msg_video_inputs = self._collect_video_inputs(messages)

@@ -512,7 +512,7 @@ class SimpleEngine(BaseEngine):
         # Convert tools for template
         template_tools = convert_tools_for_template(tools) if tools else None
 
-        enable_thinking = kwargs.pop("enable_thinking", None)
+        enable_thinking = kwargs.pop("enable_thinking", False)
 
         # Per-request routing: text-only through mlx_lm with MTP
         if (
@@ -855,7 +855,7 @@ class SimpleEngine(BaseEngine):
         except TypeError:
             # Template doesn't accept tools= or enable_thinking=
             template_kwargs.pop("tools", None)
-            template_kwargs.pop("enable_thinking", None)
+            template_kwargs.pop("enable_thinking", False)
             full_prompt = self._text_tokenizer.apply_chat_template(
                 messages, **template_kwargs
             )

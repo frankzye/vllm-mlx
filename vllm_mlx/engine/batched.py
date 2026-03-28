@@ -624,7 +624,7 @@ class BatchedEngine(BaseEngine):
         # Convert tools for template
         template_tools = convert_tools_for_template(tools) if tools else None
 
-        enable_thinking = kwargs.pop("enable_thinking", None)
+        enable_thinking = kwargs.pop("enable_thinking", False)
 
         # Apply chat template
         prompt = self._apply_chat_template(
@@ -745,7 +745,7 @@ class BatchedEngine(BaseEngine):
         # Convert tools for template
         template_tools = convert_tools_for_template(tools) if tools else None
 
-        enable_thinking = kwargs.pop("enable_thinking", None)
+        enable_thinking = kwargs.pop("enable_thinking", False)
 
         # Apply chat template
         prompt = self._apply_chat_template(
