@@ -399,6 +399,12 @@ async def ensure_model_loaded(request_model: str) -> None:
     # rewrite model_name to use the full path
     request_model = f"{os.environ.get('VLLM_MLX_MODEL_PATH', '').rstrip('/')}/{request_model}" if os.environ.get('VLLM_MLX_MODEL_PATH', '') else request_model
 
+    if os.environ.get('VLLM_MLX_MODEL_PATH', '') and not os.path.exists(request_model):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model {request_model} not found.",
+        )
+
     async with _get_model_switch_lock():
         if _engine is not None and (
             request_model == _model_path
