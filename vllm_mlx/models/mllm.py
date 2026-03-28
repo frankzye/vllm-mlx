@@ -839,6 +839,7 @@ class MLXMultimodalLM:
         video_fps: float = DEFAULT_FPS,
         video_max_frames: int = MAX_FRAMES,
         tools: list | None = None,
+        enable_thinking: bool | None = None,
     ) -> tuple[str, dict]:
         """Preprocess messages into prompt + generation kwargs for native video.
 
@@ -867,13 +868,24 @@ class MLXMultimodalLM:
         template_kwargs: dict = {}
         if tools:
             template_kwargs["tools"] = tools
+        if enable_thinking is not None:
+            template_kwargs["enable_thinking"] = enable_thinking
 
-        text = self.processor.apply_chat_template(
-            native_messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            **template_kwargs,
-        )
+        try:
+            text = self.processor.apply_chat_template(
+                native_messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                **template_kwargs,
+            )
+        except TypeError:
+            template_kwargs.pop("enable_thinking", None)
+            text = self.processor.apply_chat_template(
+                native_messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                **template_kwargs,
+            )
 
         # Extract vision inputs via mlx-vlm's process_vision_info
         image_inputs, video_inputs, fps_info = process_vision_info(
@@ -923,6 +935,7 @@ class MLXMultimodalLM:
         video_fps: float = DEFAULT_FPS,
         video_max_frames: int = MAX_FRAMES,
         tools: list | None = None,
+        enable_thinking: bool | None = None,
         **kwargs,
     ) -> MLLMOutput:
         """Generate using native video pipeline (Qwen-family models).
@@ -940,7 +953,7 @@ class MLXMultimodalLM:
             )
 
         text, gen_kwargs = self._prepare_native_video_inputs(
-            messages, video_fps, video_max_frames, tools
+            messages, video_fps, video_max_frames, tools, enable_thinking=enable_thinking
         )
         gen_kwargs["temperature"] = temperature
 
@@ -1328,6 +1341,7 @@ class MLXMultimodalLM:
         video_max_frames = kwargs.pop("video_max_frames", MAX_FRAMES)
         tools = kwargs.pop("tools", None)
         use_cache = kwargs.pop("use_cache", True)
+        enable_thinking = kwargs.pop("enable_thinking", None)
 
         # Collect video inputs from messages
         _msg_video_inputs = self._collect_video_inputs(messages)
@@ -1341,6 +1355,7 @@ class MLXMultimodalLM:
                 video_fps=video_fps,
                 video_max_frames=video_max_frames,
                 tools=tools,
+                enable_thinking=enable_thinking,
                 **kwargs,
             )
 
@@ -1451,6 +1466,8 @@ class MLXMultimodalLM:
         template_extra_kwargs = {}
         if tools:
             template_extra_kwargs["tools"] = tools
+        if enable_thinking is not None:
+            template_extra_kwargs["enable_thinking"] = enable_thinking
 
         try:
             # Use get_chat_template directly since messages are already properly formatted
@@ -1724,6 +1741,7 @@ class MLXMultimodalLM:
         video_max_frames = kwargs.pop("video_max_frames", MAX_FRAMES)
         tools = kwargs.pop("tools", None)
         use_cache = kwargs.pop("use_cache", True)
+        enable_thinking = kwargs.pop("enable_thinking", None)
 
         # Collect video inputs from messages
         _msg_video_inputs = self._collect_video_inputs(messages)
@@ -1742,6 +1760,7 @@ class MLXMultimodalLM:
                 video_fps=video_fps,
                 video_max_frames=video_max_frames,
                 tools=tools,
+                enable_thinking=enable_thinking,
                 **kwargs,
             )
             yield output
@@ -1832,6 +1851,8 @@ class MLXMultimodalLM:
         template_extra_kwargs = {}
         if tools:
             template_extra_kwargs["tools"] = tools
+        if enable_thinking is not None:
+            template_extra_kwargs["enable_thinking"] = enable_thinking
 
         try:
             formatted_prompt = get_chat_template(

@@ -272,6 +272,8 @@ class MLXLanguageModel:
         if not self._loaded:
             self.load()
 
+        enable_thinking = kwargs.pop("enable_thinking", None)
+
         # Apply chat template
         if hasattr(self.tokenizer, "apply_chat_template"):
             # Build kwargs for apply_chat_template
@@ -284,14 +286,18 @@ class MLXLanguageModel:
             if tools:
                 template_kwargs["tools"] = tools
 
+            if enable_thinking is not None:
+                template_kwargs["enable_thinking"] = enable_thinking
+
             try:
                 prompt = self.tokenizer.apply_chat_template(
                     messages,
                     **template_kwargs,
                 )
             except TypeError:
-                # Tokenizer doesn't support tools parameter
-                del template_kwargs["tools"]
+                # Tokenizer doesn't support tools or enable_thinking parameter
+                template_kwargs.pop("tools", None)
+                template_kwargs.pop("enable_thinking", None)
                 prompt = self.tokenizer.apply_chat_template(
                     messages,
                     **template_kwargs,

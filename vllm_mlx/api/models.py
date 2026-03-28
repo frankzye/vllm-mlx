@@ -178,6 +178,8 @@ class ChatCompletionRequest(BaseModel):
     specprefill: bool | None = None
     # SpecPrefill: per-request keep percentage (0.0-1.0, None = use server default)
     specprefill_keep_pct: float | None = None
+    # Chat template (Qwen3 thinking, etc.): forwarded to apply_chat_template when set
+    enable_thinking: bool | None = None
 
 
 class AssistantMessage(BaseModel):

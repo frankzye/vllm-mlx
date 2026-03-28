@@ -87,6 +87,7 @@ def anthropic_to_openai(request: AnthropicRequest) -> ChatCompletionRequest:
         stop=request.stop_sequences,
         tools=tools,
         tool_choice=tool_choice,
+        enable_thinking=request.enable_thinking,
     )
 
 

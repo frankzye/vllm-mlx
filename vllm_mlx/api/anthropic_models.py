@@ -65,6 +65,8 @@ class AnthropicRequest(BaseModel):
     tool_choice: dict | None = None
     metadata: dict | None = None
     top_k: int | None = None
+    # Forwarded to tokenizer/processor apply_chat_template when set
+    enable_thinking: bool | None = None
 
 
 # =============================================================================

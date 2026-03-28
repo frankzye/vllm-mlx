@@ -1385,6 +1385,11 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
     "/v1/chat/completions",
     dependencies=[Depends(verify_api_key), Depends(check_rate_limit)],
 )
+@app.post(
+    "/chat/completions",
+    dependencies=[Depends(verify_api_key), Depends(check_rate_limit)],
+    include_in_schema=False,
+)
 async def create_chat_completion(request: ChatCompletionRequest, raw_request: Request):
     """
     Create a chat completion (supports multimodal content for VLM models).
@@ -1522,6 +1527,9 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
         chat_kwargs["specprefill"] = request.specprefill
     if request.specprefill_keep_pct is not None:
         chat_kwargs["specprefill_keep_pct"] = request.specprefill_keep_pct
+
+    if request.enable_thinking is not None:
+        chat_kwargs["enable_thinking"] = request.enable_thinking
 
     # Add tools if provided
     if request.tools:
@@ -1703,6 +1711,9 @@ async def create_anthropic_message(
     if openai_request.tools:
         chat_kwargs["tools"] = convert_tools_for_template(openai_request.tools)
 
+    if openai_request.enable_thinking is not None:
+        chat_kwargs["enable_thinking"] = openai_request.enable_thinking
+
     start_time = time.perf_counter()
     timeout = _default_timeout
 
@@ -1867,6 +1878,9 @@ async def _stream_anthropic_messages(
 
     if openai_request.tools:
         chat_kwargs["tools"] = convert_tools_for_template(openai_request.tools)
+
+    if openai_request.enable_thinking is not None:
+        chat_kwargs["enable_thinking"] = openai_request.enable_thinking
 
     # Emit message_start
     message_start = {

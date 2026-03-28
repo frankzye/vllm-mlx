@@ -512,6 +512,8 @@ class SimpleEngine(BaseEngine):
         # Convert tools for template
         template_tools = convert_tools_for_template(tools) if tools else None
 
+        enable_thinking = kwargs.pop("enable_thinking", None)
+
         # Per-request routing: text-only through mlx_lm with MTP
         if (
             self._is_mllm
@@ -525,6 +527,7 @@ class SimpleEngine(BaseEngine):
                 temperature,
                 top_p,
                 tools=template_tools,
+                enable_thinking=enable_thinking,
                 **kwargs,
             ):
                 yield chunk
@@ -541,6 +544,10 @@ class SimpleEngine(BaseEngine):
                 accumulated_text = ""
                 token_count = 0
 
+                mllm_kwargs = dict(kwargs)
+                if enable_thinking is not None:
+                    mllm_kwargs["enable_thinking"] = enable_thinking
+
                 # Run stream_chat in thread pool since it's synchronous
                 def run_stream():
                     return list(
@@ -549,7 +556,7 @@ class SimpleEngine(BaseEngine):
                             max_tokens=max_tokens,
                             temperature=temperature,
                             tools=template_tools,
-                            **kwargs,
+                            **mllm_kwargs,
                         )
                     )
 
@@ -579,12 +586,14 @@ class SimpleEngine(BaseEngine):
         tokenizer = self._model.tokenizer
         if hasattr(tokenizer, "apply_chat_template"):
             # Disable thinking mode for coder models since it interferes
-            # with tool call parsing (tags leak as raw text).
-            enable_thinking = "coder" not in self._model_name.lower()
+            # with tool call parsing (tags leak as raw text), unless overridden.
+            thinking_val = enable_thinking
+            if thinking_val is None:
+                thinking_val = "coder" not in self._model_name.lower()
             template_kwargs = {
                 "tokenize": False,
                 "add_generation_prompt": True,
-                "enable_thinking": enable_thinking,
+                "enable_thinking": thinking_val,
             }
             if template_tools:
                 template_kwargs["tools"] = template_tools
@@ -801,6 +810,7 @@ class SimpleEngine(BaseEngine):
         temperature: float,
         top_p: float,
         tools: list | None = None,
+        enable_thinking: bool | None = None,
         **kwargs,
     ) -> AsyncIterator[GenerationOutput]:
         """Text-only generation via mlx_lm TextModel with MTP.
@@ -824,9 +834,10 @@ class SimpleEngine(BaseEngine):
         specprefill_override = kwargs.pop("specprefill", None)
         specprefill_keep_pct = kwargs.pop("specprefill_keep_pct", None)
 
-        # Read enable_thinking from env (set by runtime_patches, consistent with MLLM path)
-        enable_thinking_env = os.environ.get("VLLM_MLX_ENABLE_THINKING", "true")
-        enable_thinking = enable_thinking_env.lower() in ("true", "1", "yes")
+        # Request overrides env (consistent with MLLM path)
+        if enable_thinking is None:
+            enable_thinking_env = os.environ.get("VLLM_MLX_ENABLE_THINKING", "true")
+            enable_thinking = enable_thinking_env.lower() in ("true", "1", "yes")
 
         # Apply chat template for full prompt
         template_kwargs = {
