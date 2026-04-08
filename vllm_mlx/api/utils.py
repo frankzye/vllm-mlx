@@ -118,6 +118,8 @@ MLLM_PATTERNS = [
     "PaliGemma",  # PaliGemma
     "gemma-3",
     "gemma3",  # Gemma 3 (multimodal)
+    "gemma4",
+    "gemma-4",
     "medgemma",
     "MedGemma",  # MedGemma (medical multimodal with SigLIP vision encoder)
     "pixtral",
